@@ -2,7 +2,8 @@ require 'pry'
 require 'date'
 
 class SalesAnalyst
-    attr_reader :se
+  attr_reader :se
+
   def initialize(sales_engine)
     @se = sales_engine
   end
@@ -82,7 +83,7 @@ class SalesAnalyst
     highest_day = []
     above_sd = one_above_sd_for_day
     number_of_invoices_per_day.map do |day, count|
-    highest_day << day if count > above_sd
+      highest_day << day if count > above_sd
     end
     highest_day.compact
   end
@@ -131,63 +132,30 @@ class SalesAnalyst
   end
 
   def merchants_with_only_one_item
-	  hash = Hash.new(0)
-	    @se.items.all.each do |item|
-		      hash[item.merchant_id] += 1
-	   end
-
-	  ids = hash.find_all do |merchant_id, amount|
-		  amount == 1
-	   end.transpose[0]
-
+	  hash = merchant_ids_with_count
+	  ids = merchant_ids_with_one_item(hash)
 	  merchants_from_ids(ids)
   end
 
   def merchants_with_only_one_item_registered_in_month(month)
-    hash = Hash.new(0)
-    @se.items.all.each do |item|
-      if @se.merchants.find_by_id(item.merchant_id).created_at.strftime("%B") == month
-
-      hash[item.merchant_id] += 1
-      end
-    end
-    ids = hash.find_all do |merchant_id, amount|
-      amount == 1
-    end.transpose[0]
+    hash = merchant_ids_with_count_for_month(month)
+    ids = merchant_ids_with_one_item(hash)
     merchants_from_ids(ids)
   end
 
   def revenue_by_merchant(merchant_id)
-	  invoices = @se.invoices.all.find_all do |invoice|
-		  invoice.merchant_id == merchant_id && invoice_paid_in_full?(invoice.id)
-	   end
-     invoices.inject(0) do |sum, invoice|
-		sum + invoice_total(invoice.id)
+	  merchant_invoices = invoices_for_merchant_id(merchant_id)
+    merchant_invoices.inject(0) do |sum, invoice|
+		  sum + invoice_total(invoice.id)
 	  end
   end
 
   def most_sold_item_for_merchant(merchant_id)
-    merchant_invoices = @se.invoices.all.find_all do |invoice|
-  		invoice.merchant_id == merchant_id && invoice_paid_in_full?(invoice.id)
-  	end
-    invoice_ids = merchant_invoices.map do |invoice|
-      invoice.id
-    end
-    items_hash = Hash.new(0)
-
-    @se.invoice_items.all.each do |invoice_item|
-      if invoice_ids.include?(invoice_item.invoice_id)
-        items_hash[invoice_item.item_id] += invoice_item.quantity
-      end
-    end
-
-    max_item_quantity = items_hash.max_by do |item_id, quantity|
-      quantity
-    end[1]
-
-    top_item_ids = items_hash.find_all do |item_id, quantity|
-      quantity == max_item_quantity
-    end
+    merchant_invoices = invoices_for_merchant_id(merchant_id)
+    invoice_ids = ids_from_invoices(merchant_invoices)
+    items_hash = invoice_items_with_quantities(invoice_ids)
+    max_item_quantity = find_max_from_hash(items_hash)[1]
+    top_item_ids = top_items_from_hash(items_hash, max_item_quantity)
 
     top_item_ids.map do |item_id|
       @se.items.find_by_id(item_id[0])
@@ -195,26 +163,12 @@ class SalesAnalyst
   end
 
   def best_item_for_merchant(merchant_id)
-    merchant_invoices = @se.invoices.all.find_all do |invoice|
-  		invoice.merchant_id == merchant_id && invoice_paid_in_full?(invoice.id)
-  	end
-    invoice_ids = merchant_invoices.map do |invoice|
-      invoice.id
-    end
-    items_hash = Hash.new(0)
-
-    @se.invoice_items.all.each do |invoice_item|
-      if invoice_ids.include?(invoice_item.invoice_id)
-        items_hash[invoice_item.item_id] += (invoice_item.quantity * invoice_item.unit_price)
-      end
-    end
-
-    max_revenue_item = items_hash.max_by do |item_id, revenue|
-      revenue
-    end
+    merchant_invoices = invoices_for_merchant_id(merchant_id)
+    invoice_ids = ids_from_invoices(merchant_invoices)
+    items_hash = invoice_items_with_revenue(invoice_ids)
+    max_revenue_item = find_max_from_hash(items_hash)
 
     @se.items.find_by_id(max_revenue_item[0])
-
   end
 
   #-- Iteration 1 Helper Methods --#
@@ -281,10 +235,10 @@ class SalesAnalyst
 
   def invoice_count_per_merchant_id
     hash = Hash.new(0)
-      @se.invoices.all.each do |invoice|
+    @se.invoices.all.each do |invoice|
       hash[invoice.merchant_id] += 1
-      end
-     hash
+    end
+    hash
   end
 
   def two_above_standard_deviation
@@ -354,8 +308,8 @@ class SalesAnalyst
 #-----Iteration 3 Helper Method -----#
 
   def total_revenue_by_item(invoice_items)
-  invoice_items.inject(0) do |sum, num|
-    sum + (num.quantity.to_i * num.unit_price)
+    invoice_items.inject(0) do |sum, num|
+      sum + (num.quantity.to_i * num.unit_price)
     end
   end
 
@@ -371,4 +325,73 @@ class SalesAnalyst
       revenue * -1
     end.transpose[0]
   end
+
+  def merchant_ids_with_count
+    hash = Hash.new(0)
+    @se.items.all.each do |item|
+      hash[item.merchant_id] += 1
+    end
+    hash
+  end
+
+  def merchant_ids_with_count_for_month(month)
+    hash = Hash.new(0)
+    @se.items.all.each do |item|
+      if @se.merchants.find_by_id(item.merchant_id).created_at.strftime("%B") == month
+        hash[item.merchant_id] += 1
+      end
+    end
+    hash
+  end
+
+  def merchant_ids_with_one_item(hash)
+    hash.find_all do |merchant_id, amount|
+      amount == 1
+    end.transpose[0]
+  end
+
+  def invoices_for_merchant_id(merchant_id)
+    @se.invoices.all.find_all do |invoice|
+		  invoice.merchant_id == merchant_id && invoice_paid_in_full?(invoice.id)
+	  end
+  end
+
+  def ids_from_invoices(invoices)
+    invoices.map do |invoice|
+      invoice.id
+    end
+  end
+
+  def invoice_items_with_quantities(invoice_ids)
+    items_hash = Hash.new(0)
+    @se.invoice_items.all.each do |ii|
+      if invoice_ids.include?(ii.invoice_id)
+        items_hash[ii.item_id] += ii.quantity
+      end
+    end
+    items_hash
+  end
+
+  def invoice_items_with_revenue(invoice_ids)
+    items_hash = Hash.new(0)
+    @se.invoice_items.all.each do |ii|
+      if invoice_ids.include?(ii.invoice_id)
+        items_hash[ii.item_id] += (ii.quantity * ii.unit_price)
+      end
+    end
+    items_hash
+  end
+
+  def find_max_from_hash(hash)
+    hash.max_by do |item_id, value|
+      value
+    end
+  end
+
+  def top_items_from_hash(hash, max_item_quantity)
+    hash.find_all do |item_id, quantity|
+      quantity == max_item_quantity
+    end
+  end
+
 end
